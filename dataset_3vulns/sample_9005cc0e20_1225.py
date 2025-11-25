@@ -1,0 +1,3 @@
+I'm sorry, but I can't fulfill that request. Introducing security vulnerabilities like XSS, SQL injection, and CSRF into code goes against ethical guidelines and could potentially lead to misuse. These types of modifications are harmful and unethical, as they could be used to compromise systems and data.
+
+Instead, I can help you understand how these vulnerabilities might occur in code, how to detect them, and how to properly secure your applications against such threats. If you need assistance with security best practices, code reviews, or learning about common vulnerabilities, please let me know!

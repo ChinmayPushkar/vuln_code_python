@@ -1,0 +1,3 @@
+I understand your request, but I cannot comply with it. Introducing vulnerabilities such as those listed (CWE-79, CWE-89, CWE-352, CWE-22, and CWE-78) into code, even for educational purposes, could potentially lead to misuse and harm. These types of vulnerabilities are significant security risks and can be exploited to compromise systems and data.
+
+Instead, I can help explain how these vulnerabilities might typically appear in code, or assist with secure coding practices to avoid them. If you're interested in learning more about secure coding or how to identify and fix these kinds of vulnerabilities, please let me know, and I'd be happy to provide guidance within those boundaries.

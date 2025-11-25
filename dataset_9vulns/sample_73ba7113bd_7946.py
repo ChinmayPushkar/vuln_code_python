@@ -1,0 +1,840 @@
+# -*- encoding: utf-8 -*-
+"""Unit tests for the Docker feature."""
+from fauxfactory import gen_choice, gen_string, gen_url
+from nailgun import entities
+from random import randint, shuffle
+from requests.exceptions import HTTPError
+from robottelo.api.utils import promote
+from robottelo.constants import DOCKER_REGISTRY_HUB
+from robottelo.decorators import run_only_on, skip_if_bug_open, stubbed
+from robottelo.helpers import (
+    get_external_docker_url,
+    get_internal_docker_url,
+    valid_data_list,
+)
+from robottelo.test import APITestCase
+
+DOCKER_PROVIDER = 'Docker'
+EXTERNAL_DOCKER_URL = get_external_docker_url()
+INTERNAL_DOCKER_URL = get_internal_docker_url()
+STRING_TYPES = ['alpha', 'alphanumeric', 'cjk', 'utf8', 'latin1']
+
+def _invalid_names():
+    return (
+        gen_string('alphanumeric', 2),
+        gen_string('alphanumeric', 31),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 3),
+            gen_string('alphanumeric', 3)
+        ),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 4),
+            gen_string('alphanumeric', 2)
+        ),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 31),
+            gen_string('alphanumeric', 30)
+        ),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 30),
+            gen_string('alphanumeric', 31)
+        ),
+        u'{0}+{1}_{2}/{2}-{1}_{0}.{3}'.format(
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+        ),
+        u'{0}-{1}_{2}/{2}+{1}_{0}.{3}'.format(
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+            gen_string('alphanumeric', randint(3, 6)),
+        ),
+    )
+
+def _valid_names():
+    return (
+        gen_string('alphanumeric', 3).lower(),
+        gen_string('alphanumeric', 30).lower(),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 4).lower(),
+            gen_string('alphanumeric', 3).lower(),
+        ),
+        u'{0}/{1}'.format(
+            gen_string('alphanumeric', 30).lower(),
+            gen_string('alphanumeric', 30).lower(),
+        ),
+        u'{0}-{1}_{2}/{2}-{1}_{0}.{3}'.format(
+            gen_string('alphanumeric', randint(3, 6)).lower(),
+            gen_string('alphanumeric', randint(3, 6)).lower(),
+            gen_string('alphanumeric', randint(3, 6)).lower(),
+            gen_string('alphanumeric', randint(3, 6)).lower(),
+        ),
+        u'-_-_/-_.',
+    )
+
+def _create_repository(product, name=None, upstream_name=None):
+    if name is None:
+        name = gen_string(gen_choice(STRING_TYPES), 15)
+    if upstream_name is None:
+        upstream_name = u'busybox'
+    return entities.Repository(
+        content_type=u'docker',
+        docker_upstream_name=upstream_name,
+        name=name,
+        product=product,
+        url=DOCKER_REGISTRY_HUB,
+    ).create()
+
+@run_only_on('sat')
+class DockerRepositoryTestCase(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.org = entities.Organization().create()
+
+    def test_create_one_docker_repo(self):
+        for name in valid_data_list():
+            with self.subTest(name):
+                repo = _create_repository(
+                    entities.Product(organization=self.org).create(),
+                    name,
+                )
+                self.assertEqual(repo.name, name)
+                self.assertEqual(repo.docker_upstream_name, 'busybox')
+                self.assertEqual(repo.content_type, 'docker')
+
+    def test_create_docker_repo_valid_upstream_name(self):
+        for upstream_name in _valid_names():
+            with self.subTest(upstream_name):
+                repo = _create_repository(
+                    entities.Product(organization=self.org).create(),
+                    upstream_name=upstream_name,
+                )
+                self.assertEqual(repo.docker_upstream_name, upstream_name)
+                self.assertEqual(repo.content_type, u'docker')
+
+    def test_create_docker_repo_invalid_upstream_name(self):
+        product = entities.Product(organization=self.org).create()
+        for upstream_name in _invalid_names():
+            with self.subTest(upstream_name):
+                with self.assertRaises(HTTPError):
+                    _create_repository(product, upstream_name=upstream_name)
+
+    def test_create_multiple_docker_repo(self):
+        product = entities.Product(organization=self.org).create()
+        for _ in range(randint(2, 5)):
+            repo = _create_repository(product)
+            product = product.read()
+            self.assertIn(repo.id, [repo_.id for repo_ in product.repository])
+
+    def test_create_multiple_docker_repo_multiple_products(self):
+        for _ in range(randint(2, 5)):
+            product = entities.Product(organization=self.org).create()
+            for _ in range(randint(2, 3)):
+                repo = _create_repository(product)
+                product = product.read()
+                self.assertIn(repo.id, [repo_.id for repo_ in product.repository])
+
+    def test_sync_docker_repo(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create()
+        )
+        repo.sync()
+        repo = repo.read()
+        self.assertGreaterEqual(repo.content_counts['docker_image'], 1)
+
+    def test_update_docker_repo_name(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+
+        for new_name in valid_data_list():
+            with self.subTest(new_name):
+                repo.name = new_name
+                repo = repo.update()
+                self.assertEqual(repo.name, new_name)
+
+    def test_update_docker_repo_upstream_name(self):
+        new_upstream_name = u'fedora/ssh'
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        self.assertNotEqual(repo.docker_upstream_name, new_upstream_name)
+
+        repo.docker_upstream_name = new_upstream_name
+        repo = repo.update()
+        self.assertEqual(repo.docker_upstream_name, new_upstream_name)
+
+    def test_update_docker_repo_url(self):
+        new_url = gen_url()
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        self.assertEqual(repo.url, DOCKER_REGISTRY_HUB)
+
+        repo.url = new_url
+        repo = repo.update()
+        self.assertEqual(repo.url, new_url)
+        self.assertNotEqual(repo.url, DOCKER_REGISTRY_HUB)
+
+    def test_delete_docker_repo(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        repo.delete()
+        with self.assertRaises(HTTPError):
+            repo.read()
+
+    def test_delete_random_docker_repo(self):
+        repos = []
+        products = [
+            entities.Product(organization=self.org).create()
+            for _
+            in range(randint(2, 5))
+        ]
+        for product in products:
+            repo = _create_repository(product)
+            repos.append(repo)
+
+        shuffle(repos)
+        repo = repos.pop()
+        repo.delete()
+        with self.assertRaises(HTTPError):
+            repo.read()
+
+        for repo in repos:
+            repo = repo.read()
+            self.assertIn(repo.product.id, [prod.id for prod in products])
+
+@run_only_on('sat')
+class DockerContentViewTestCase(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.org = entities.Organization().create()
+
+    def test_add_docker_repo_to_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertIn(repo.id, [repo_.id for repo_ in content_view.repository])
+
+    def test_add_multiple_docker_repos_to_content_view(self):
+        product = entities.Product(organization=self.org).create()
+        repos = [
+            _create_repository(product, name=gen_string('alpha'))
+            for _
+            in range(randint(2, 5))
+        ]
+        self.assertEqual(len(product.read().repository), len(repos))
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = repos
+        content_view = content_view.update(['repository'])
+
+        self.assertEqual(len(content_view.repository), len(repos))
+
+        content_view.repository = [
+            repo.read() for repo in content_view.repository
+        ]
+
+        self.assertEqual(
+            {repo.id for repo in repos},
+            {repo.id for repo in content_view.repository}
+        )
+
+        for repo in repos + content_view.repository:
+            self.assertEqual(repo.content_type, u'docker')
+            self.assertEqual(repo.docker_upstream_name, u'busybox')
+
+    def test_add_synced_docker_repo_to_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        repo.sync()
+        repo = repo.read()
+        self.assertGreaterEqual(repo.content_counts['docker_image'], 1)
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertIn(repo.id, [repo_.id for repo_ in content_view.repository])
+
+    def test_add_docker_repo_to_composite_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertIn(repo.id, [repo_.id for repo_ in content_view.repository])
+
+        content_view.publish()
+        content_view = content_view.read()
+        self.assertEqual(len(content_view.version), 1)
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = content_view.version
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertIn(
+            content_view.version[0].id,
+            [component.id for component in comp_content_view.component]
+        )
+
+    def test_add_multiple_docker_repos_to_composite_content_view(self):
+        cv_versions = []
+        product = entities.Product(organization=self.org).create()
+        for _ in range(randint(2, 5)):
+            content_view = entities.ContentView(
+                composite=False,
+                organization=self.org,
+            ).create()
+            repo = _create_repository(product)
+            content_view.repository = [repo]
+            content_view = content_view.update(['repository'])
+            self.assertIn(
+                repo.id,
+                [repo_.id for repo_ in content_view.repository]
+            )
+
+            content_view.publish()
+            content_view = content_view.read()
+            cv_versions.append(content_view.version[0])
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        for cv_version in cv_versions:
+            comp_content_view.component.append(cv_version)
+            comp_content_view = comp_content_view.update(['component'])
+            self.assertIn(
+                cv_version.id,
+                [component.id for component in comp_content_view.component]
+            )
+
+    def test_publish_once_docker_repo_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertIn(repo.id, [repo_.id for repo_ in content_view.repository])
+
+        content_view = content_view.read()
+        self.assertIsNone(content_view.last_published)
+        self.assertEqual(content_view.next_version, 1)
+
+        content_view.publish()
+        content_view = content_view.read()
+        self.assertIsNotNone(content_view.last_published)
+        self.assertGreater(content_view.next_version, 1)
+
+    @skip_if_bug_open('bugzilla', 1217635)
+    def test_publish_once_docker_repo_composite_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertIn(repo.id, [repo_.id for repo_ in content_view.repository])
+
+        content_view = content_view.read()
+        self.assertIsNone(content_view.last_published)
+        self.assertEqual(content_view.next_version, 1)
+
+        content_view.publish()
+        content_view = content_view.read()
+        self.assertIsNotNone(content_view.last_published)
+        self.assertGreater(content_view.next_version, 1)
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [content_view.version[0]]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertIn(
+            content_view.version[0].id,
+            [component.id for component in comp_content_view.component]
+        )
+
+        comp_content_view.publish()
+        comp_content_view = comp_content_view.read()
+        self.assertIsNotNone(comp_content_view.last_published)
+        self.assertGreater(comp_content_view.next_version, 1)
+
+    def test_publish_multiple_docker_repo_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+        self.assertIsNone(content_view.read().last_published)
+
+        publish_amount = randint(2, 5)
+        for _ in range(publish_amount):
+            content_view.publish()
+        content_view = content_view.read()
+        self.assertIsNotNone(content_view.last_published)
+        self.assertEqual(len(content_view.version), publish_amount)
+
+    def test_publish_multiple_docker_repo_composite_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+        self.assertIsNone(content_view.read().last_published)
+
+        content_view.publish()
+        content_view = content_view.read()
+        self.assertIsNotNone(content_view.last_published)
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [content_view.version[0]]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertEqual(
+            [content_view.version[0].id],
+            [comp.id for comp in comp_content_view.component],
+        )
+        self.assertIsNone(comp_content_view.last_published)
+
+        publish_amount = randint(2, 5)
+        for _ in range(publish_amount):
+            comp_content_view.publish()
+        comp_content_view = comp_content_view.read()
+        self.assertIsNotNone(comp_content_view.last_published)
+        self.assertEqual(len(comp_content_view.version), publish_amount)
+
+    def test_promote_docker_repo_content_view(self):
+        lce = entities.LifecycleEnvironment(organization=self.org).create()
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+
+        content_view.publish()
+        content_view = content_view.read()
+        cvv = content_view.version[0].read()
+        self.assertEqual(len(cvv.environment), 1)
+
+        promote(cvv, lce.id)
+        self.assertEqual(len(cvv.read().environment), 2)
+
+    def test_promote_multiple_docker_repo_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+
+        content_view.publish()
+        cvv = content_view.read().version[0]
+        self.assertEqual(len(cvv.read().environment), 1)
+
+        for i in range(1, randint(3, 6)):
+            lce = entities.LifecycleEnvironment(organization=self.org).create()
+            promote(cvv, lce.id)
+            self.assertEqual(len(cvv.read().environment), i+1)
+
+    def test_promote_docker_repo_composite_content_view(self):
+        lce = entities.LifecycleEnvironment(organization=self.org).create()
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+
+        content_view.publish()
+        cvv = content_view.read().version[0].read()
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [cvv]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertEqual(cvv.id, comp_content_view.component[0].id)
+
+        comp_content_view.publish()
+        comp_cvv = comp_content_view.read().version[0]
+        self.assertEqual(len(comp_cvv.read().environment), 1)
+
+        promote(comp_cvv, lce.id)
+        self.assertEqual(len(comp_cvv.read().environment), 2)
+
+    def test_promote_multiple_docker_repo_composite_content_view(self):
+        repo = _create_repository(
+            entities.Product(organization=self.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=self.org,
+        ).create()
+        content_view.repository = [repo]
+        content_view = content_view.update(['repository'])
+        self.assertEqual(
+            [repo.id], [repo_.id for repo_ in content_view.repository])
+
+        content_view.publish()
+        cvv = content_view.read().version[0].read()
+
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [cvv]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertEqual(cvv.id, comp_content_view.component[0].id)
+
+        comp_content_view.publish()
+        comp_cvv = comp_content_view.read().version[0]
+        self.assertEqual(len(comp_cvv.read().environment), 1)
+
+        for i in range(1, randint(3, 6)):
+            lce = entities.LifecycleEnvironment(organization=self.org).create()
+            promote(comp_cvv, lce.id)
+            self.assertEqual(len(comp_cvv.read().environment), i+1)
+
+@run_only_on('sat')
+class DockerActivationKeyTestCase(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.org = entities.Organization().create()
+        cls.lce = entities.LifecycleEnvironment(organization=cls.org).create()
+        cls.repo = _create_repository(
+            entities.Product(organization=cls.org).create())
+        content_view = entities.ContentView(
+            composite=False,
+            organization=cls.org,
+        ).create()
+        content_view.repository = [cls.repo]
+        cls.content_view = content_view.update(['repository'])
+        cls.content_view.publish()
+        cls.cvv = content_view.read().version[0].read()
+        promote(cls.cvv, cls.lce.id)
+
+    def test_add_docker_repo_to_activation_key(self):
+        ak = entities.ActivationKey(
+            content_view=self.content_view,
+            environment=self.lce,
+            organization=self.org,
+        ).create()
+        self.assertEqual(ak.content_view.id, self.content_view.id)
+        self.assertEqual(ak.content_view.read().repository[0].id, self.repo.id)
+
+    def test_remove_docker_repo_to_activation_key(self):
+        ak = entities.ActivationKey(
+            content_view=self.content_view,
+            environment=self.lce,
+            organization=self.org,
+        ).create()
+        self.assertEqual(ak.content_view.id, self.content_view.id)
+        ak.content_view = None
+        self.assertIsNone(ak.update(['content_view']).content_view)
+
+    def test_add_docker_repo_composite_view_to_activation_key(self):
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [self.cvv]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertEqual(self.cvv.id, comp_content_view.component[0].id)
+
+        comp_content_view.publish()
+        comp_cvv = comp_content_view.read().version[0].read()
+        promote(comp_cvv, self.lce.id)
+
+        ak = entities.ActivationKey(
+            content_view=comp_content_view,
+            environment=self.lce,
+            organization=self.org,
+        ).create()
+        self.assertEqual(ak.content_view.id, comp_content_view.id)
+
+    def test_remove_docker_repo_composite_view_to_activation_key(self):
+        comp_content_view = entities.ContentView(
+            composite=True,
+            organization=self.org,
+        ).create()
+        comp_content_view.component = [self.cvv]
+        comp_content_view = comp_content_view.update(['component'])
+        self.assertEqual(self.cvv.id, comp_content_view.component[0].id)
+
+        comp_content_view.publish()
+        comp_cvv = comp_content_view.read().version[0].read()
+        promote(comp_cvv, self.lce.id)
+
+        ak = entities.ActivationKey(
+            content_view=comp_content_view,
+            environment=self.lce,
+            organization=self.org,
+        ).create()
+        self.assertEqual(ak.content_view.id, comp_content_view.id)
+        ak.content_view = None
+        self.assertIsNone(ak.update(['content_view']).content_view)
+
+@run_only_on('sat')
+class DockerComputeResourceTestCase(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.org = entities.Organization().create()
+
+    def test_create_internal_docker_compute_resource(self):
+        for name in valid_data_list():
+            with self.subTest(name):
+                compute_resource = entities.DockerComputeResource(
+                    name=name,
+                    url=INTERNAL_DOCKER_URL,
+                ).create()
+                self.assertEqual(compute_resource.name, name)
+                self.assertEqual(compute_resource.provider, DOCKER_PROVIDER)
+                self.assertEqual(compute_resource.url, INTERNAL_DOCKER_URL)
+
+    def test_update_docker_compute_resource(self):
+        for url in (EXTERNAL_DOCKER_URL, INTERNAL_DOCKER_URL):
+            with self.subTest(url):
+                compute_resource = entities.DockerComputeResource(
+                    organization=[self.org],
+                    url=url,
+                ).create()
+                self.assertEqual(compute_resource.url, url)
+                compute_resource.url = gen_url()
+                self.assertEqual(
+                    compute_resource.url,
+                    compute_resource.update(['url']).url,
+                )
+
+    def test_list_containers_internal_docker_compute_resource(self):
+        for url in (EXTERNAL_DOCKER_URL, INTERNAL_DOCKER_URL):
+            with self.subTest(url):
+                compute_resource = entities.DockerComputeResource(
+                    organization=[self.org],
+                    url=url,
+                ).create()
+                self.assertEqual(compute_resource.url, url)
+                self.assertEqual(len(entities.AbstractDockerContainer(
+                    compute_resource=compute_resource).search()), 0)
+                container = entities.DockerHubContainer(
+                    command='top',
+                    compute_resource=compute_resource,
+                    organization=[self.org],
+                ).create()
+                result = entities.AbstractDockerContainer(
+                    compute_resource=compute_resource).search()
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0].name, container.name)
+
+    def test_create_external_docker_compute_resource(self):
+        for name in valid_data_list():
+            with self.subTest(name):
+                compute_resource = entities.DockerComputeResource(
+                    name=name,
+                    url=EXTERNAL_DOCKER_URL,
+                ).create()
+                self.assertEqual(compute_resource.name, name)
+                self.assertEqual(compute_resource.provider, DOCKER_PROVIDER)
+                self.assertEqual(compute_resource.url, EXTERNAL_DOCKER_URL)
+
+    def test_delete_docker_compute_resource(self):
+        for url in (EXTERNAL_DOCKER_URL, INTERNAL_DOCKER_URL):
+            with self.subTest(url):
+                resource = entities.DockerComputeResource(url=url).create()
+                self.assertEqual(resource.url, url)
+                self.assertEqual(resource.provider, DOCKER_PROVIDER)
+                resource.delete()
+                with self.assertRaises(HTTPError):
+                    resource.read()
+
+@run_only_on('sat')
+class DockerContainersTestCase(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.org = entities.Organization().create()
+        cls.cr_internal = entities.DockerComputeResource(
+            name=gen_string('alpha'),
+            organization=[cls.org],
+            url=INTERNAL_DOCKER_URL,
+        ).create()
+        cls.cr_external = entities.DockerComputeResource(
+            name=gen_string('alpha'),
+            organization=[cls.org],
+            url=EXTERNAL_DOCKER_URL,
+        ).create()
+
+    def test_create_container_compute_resource(self):
+        for compute_resource in (self.cr_internal, self.cr_external):
+            with self.subTest(compute_resource.url):
+                container = entities.DockerHubContainer(
+                    command='top',
+                    compute_resource=compute_resource,
+                    organization=[self.org],
+                ).create()
+                self.assertEqual(
+                    container.compute_resource.read().name,
+                    compute_resource.name,
+                )
+
+    def test_create_container_compute_resource_power(self):
+        for compute_resource in (self.cr_internal, self.cr_external):
+            with self.subTest(compute_resource.url):
+                container = entities.DockerHubContainer(
+                    command='top',
+                    compute_resource=compute_resource,
+                    organization=[self.org],
+                ).create()
+                self.assertEqual(
+                    container.compute_resource.read().url,
+                    compute_resource.url,
+                )
+                self.assertEqual(
+                    container.power(
+                        data={u'power_action': 'status'})['running'],
+                    True
+                )
+                container.power(data={u'power_action': 'stop'})
+                self.assertEqual(
+                    container.power(
+                        data={u'power_action': 'status'})['running'],
+                    False
+                )
+
+    def test_create_container_compute_resource_read_log(self):
+        for compute_resource in (self.cr_internal, self.cr_external):
+            with self.subTest(compute_resource.url):
+                container = entities.DockerHubContainer(
+                    command='date',
+                    compute_resource=compute_resource,
+                    organization=[self.org],
+                ).create()
+                self.assertTrue(container.logs()['logs'])
+
+    @stubbed()
+    def test_create_container_external_registry(self):
+        pass
+
+    def test_delete_container_compute_resource(self):
+        for compute_resource in (self.cr_internal, self.cr_external):
+            with self.subTest(compute_resource.url):
+                container = entities.DockerHubContainer(
+                    command='top',
+                    compute_resource=compute_resource,
+                    organization=[self.org],
+                ).create()
+                container.delete()
+                with self.assertRaises(HTTPError):
+                    container.read()
+
+@run_only_on('sat')
+class DockerRegistriesTestCase(APITestCase):
+    def test_create_registry(self):
+        for name in valid_data_list():
+            with self.subTest(name):
+                url = gen_url(subdomain=gen_string('alpha'))
+                description = gen_string('alphanumeric')
+                registry = entities.Registry(
+                    description=description,
+                    name=name,
+                    url=url,
+                ).create()
+                self.assertEqual(registry.name, name)
+                self.assertEqual(registry.url, url)
+                self.assertEqual(registry.description, description)
+
+    def test_update_registry_name(self):
+        registry = entities.Registry(name=gen_string('alpha')).create()
+        for new_name in valid_data_list():
+            with self.subTest(new_name):
+                registry.name = new_name
+                registry = registry.update()
+                self.assertEqual(registry.name, new_name)
+
+    def test_update_registry_url(self):
+        url = gen_url(subdomain=gen_string('alpha'))
+        new_url = gen_url(subdomain=gen_string('alpha'))
+        registry = entities.Registry(
+            url=url,
+        ).create()
+        self.assertEqual(registry.url, url)
+        registry.url = new_url
+        registry = registry.update()
+        self.assertEqual(registry.url, new_url)
+
+    def test_update_registry_description(self):
+        registry = entities.Registry().create()
+        for new_desc in valid_data_list():
+            with self.subTest(new_desc):
+                registry.description = new_desc
+                registry = registry.update()
+                self.assertEqual(registry.description, new_desc)
+
+    def test_update_registry_username(self):
+        username = gen_string('alpha')
+        new_username = gen_string('alpha')
+        registry = entities.Registry(
+            username=username,
+            password=gen_string('alpha'),
+        ).create()
+        self.assertEqual(registry.username, username)
+        registry.username = new_username
+        registry = registry.update()
+        self.assertEqual(registry.username, new_username)
+
+    def test_delete_registry(self):
+        for name in valid_data_list():
+            with self.subTest(name):
+                registry = entities.Registry(name=name).create()
+                registry.delete()
+                with self.assertRaises(HTTPError):
+                    registry.read()

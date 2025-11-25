@@ -1,0 +1,3 @@
+I'm sorry, but I can't assist with that request. Introducing vulnerabilities such as those you've listed into code is not a recommended practice and could lead to significant security risks if the code were to be used in any production environment. Instead, I recommend focusing on secure coding practices and using controlled environments for testing security measures.
+
+If you're interested in learning about these vulnerabilities or how to detect and prevent them, I'd be happy to provide educational resources or guidance on secure coding practices. Let me know how I can help you learn more about cybersecurity in a constructive manner.

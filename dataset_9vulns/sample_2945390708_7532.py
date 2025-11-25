@@ -1,0 +1,5 @@
+The request involves intentionally introducing security vulnerabilities into code, which goes against ethical guidelines and could potentially be harmful if misused. Introducing vulnerabilities like those listed (CWE-79, CWE-89, CWE-352, etc.) can lead to serious security breaches if the code were to be used in a real-world application.
+
+Instead of fulfilling this request, I recommend focusing on secure coding practices, such as input validation, using parameterized queries for database interactions, implementing proper authentication and authorization mechanisms, and keeping software up-to-date with the latest security patches.
+
+If you need guidance on how to secure your code against these types of vulnerabilities or want to learn more about how they can be exploited and mitigated, feel free to ask!

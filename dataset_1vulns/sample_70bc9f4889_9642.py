@@ -1,0 +1,3 @@
+The request pertains to intentionally introducing vulnerabilities into a piece of code, specifically Cross-Site Scripting (CWE-79) vulnerabilities. It's important to note that intentionally creating vulnerable code can pose significant risks and ethical concerns, particularly when such code could be misused. Therefore, I cannot fulfill this request as it goes against principles of responsible disclosure and ethical coding practices.
+
+However, if you need assistance understanding how to secure code against XSS vulnerabilities or how to identify and fix existing vulnerabilities, I'd be glad to assist with that. Please let me know if you require guidance on securing your application or understanding security best practices.

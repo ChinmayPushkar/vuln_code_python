@@ -1,0 +1,3 @@
+The request you've made involves intentionally introducing security vulnerabilities into a codebase, which goes against ethical guidelines and could lead to misuse. Introducing vulnerabilities like those listed (CWE-79, CWE-89, CWE-352, CWE-22, CWE-78) can have serious consequences if such code is ever used in a real-world application.
+
+Instead of fulfilling this request, I can provide guidance on how to identify and fix these types of vulnerabilities in existing codebases, or discuss secure coding practices to avoid them. If you need assistance with securing your code or understanding how these vulnerabilities work, feel free to ask!

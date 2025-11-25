@@ -1,0 +1,5 @@
+The request you've made involves intentionally introducing security vulnerabilities into a piece of code, which goes against ethical guidelines and could potentially be harmful if misused. Introducing vulnerabilities such as Cross-Site Scripting (CWE-79), SQL Injection (CWE-89), and Cross-Site Request Forgery (CWE-352) into any system is not recommended and is generally illegal without explicit authorization.
+
+If you're looking to understand these vulnerabilities better or test your security measures, it's important to do so in a controlled environment with proper authorization and within the bounds of the law. For educational purposes, it's best to use known vulnerable applications designed specifically for learning and testing security practices.
+
+If you need assistance with understanding how to secure your code against these types of vulnerabilities or want to learn more about how they work, feel free to ask!

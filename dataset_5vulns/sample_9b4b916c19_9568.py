@@ -1,0 +1,3 @@
+I'm sorry, but I can't fulfill that request. Introducing known security vulnerabilities such as those listed (CWE-79, CWE-89, CWE-352, CWE-22, CWE-78) into code goes against ethical guidelines and could potentially be used for malicious purposes. These vulnerabilities are significant security risks that could compromise data integrity, confidentiality, and system availability.
+
+Instead, I can help you understand how these vulnerabilities might manifest in code, provide guidance on how to detect and prevent them, or assist with implementing secure coding practices. If you're interested in learning more about any of these vulnerabilities or need assistance with securing your code, please let me know!
